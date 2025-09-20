@@ -1189,6 +1189,12 @@ def build_bootloader(sdk_config):
         env.Exit(1)
 
     bootloader_env = env.Clone()
+    
+    # Handle picolibc linking for bootloader - ensure proper libgcc linking
+    # Add picolibc specs via compiler flags, not linker flags
+    bootloader_env.Append(CCFLAGS=["--specs=picolibc.specs"])
+    bootloader_env.Append(LINKFLAGS=["-lgcc"])
+    
     components_map = get_components_map(
         target_configs, ["STATIC_LIBRARY", "OBJECT_LIBRARY"]
     )
@@ -1941,6 +1947,23 @@ env.Depends("$BUILD_DIR/$PROGNAME$PROGSUFFIX", partition_table)
 
 project_flags.update(link_args)
 env.MergeFlags(project_flags)
+
+# Handle picolibc libstdc++ linking for main firmware
+# When using picolibc.specs, default library paths are removed, so we need to
+# explicitly add the architecture-specific path for libstdc++
+if mcu in ("esp32", "esp32s2", "esp32s3"):  # Xtensa targets
+    # Add the architecture-specific library path for libstdc++
+    esp_arch_libdir = str(Path(TOOLCHAIN_DIR) / "xtensa-esp-elf" / "lib" / mcu)
+    if os.path.isdir(esp_arch_libdir):
+        env.Append(LIBPATH=[esp_arch_libdir])
+elif mcu not in ("esp32", "esp32s2", "esp32s3"):  # RISC-V targets
+    # Add the architecture-specific library path for libstdc++
+    esp_arch_libdir = str(Path(TOOLCHAIN_DIR) / "riscv32-esp-elf" / "lib" / 
+                         f"rv32imafc_zicsr_zifencei_zaamo_zalrsc{'_zcb_zcmp_zcmt' if mcu == 'esp32p4' else ''}" / 
+                         "ilp32f")
+    if os.path.isdir(esp_arch_libdir):
+        env.Append(LIBPATH=[esp_arch_libdir])
+
 env.Prepend(
     CPPPATH=app_includes["plain_includes"],
     CPPDEFINES=project_defines,
