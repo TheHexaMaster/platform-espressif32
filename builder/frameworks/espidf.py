@@ -1957,10 +1957,22 @@ if mcu in ("esp32", "esp32s2", "esp32s3"):  # Xtensa targets
     if os.path.isdir(esp_arch_libdir):
         env.Append(LIBPATH=[esp_arch_libdir])
 elif mcu not in ("esp32", "esp32s2", "esp32s3"):  # RISC-V targets
+    # Determine float ABI based on ESP32 variant:
+    # ESP32-P4: Hardware float (ilp32f with rv32imafc)
+    # ESP32-C3: Software float (ilp32 with rv32imac) - no F extension
+    # Others: Default to hardware float
+    
+    if mcu == "esp32c3":
+        # ESP32-C3: Software float ABI (no F extension)
+        arch_str = "rv32imac_zicsr_zifencei_zaamo_zalrsc"
+        abi_str = "ilp32"
+    else:
+        # ESP32-P4 and others: Hardware float ABI (F extension)
+        arch_str = f"rv32imafc_zicsr_zifencei_zaamo_zalrsc{'_zcb_zcmp_zcmt' if mcu == 'esp32p4' else ''}"
+        abi_str = "ilp32f"
+    
     # Add the architecture-specific library path for libstdc++
-    esp_arch_libdir = str(Path(TOOLCHAIN_DIR) / "riscv32-esp-elf" / "lib" / 
-                         f"rv32imafc_zicsr_zifencei_zaamo_zalrsc{'_zcb_zcmp_zcmt' if mcu == 'esp32p4' else ''}" / 
-                         "ilp32f")
+    esp_arch_libdir = str(Path(TOOLCHAIN_DIR) / "riscv32-esp-elf" / "lib" / arch_str / abi_str)
     if os.path.isdir(esp_arch_libdir):
         env.Append(LIBPATH=[esp_arch_libdir])
 
