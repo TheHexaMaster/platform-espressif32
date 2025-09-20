@@ -1990,18 +1990,6 @@ elif mcu not in ("esp32", "esp32s2", "esp32s3"):  # RISC-V targets
             arch_str_lib = arch_str.replace("_xespdsp", "")
         arch_str = arch_str_lib
     
-    # Fallback to dynamic detection from SDK config if toolchain file not found or parsing failed
-    if not arch_str:
-        uses_software_float = sdk_config.get("COMPILER_FLOAT_LIB_FROM_GCCLIB", False)
-        if uses_software_float:
-            # Software float ABI (no F extension) - typically ESP32-C3
-            arch_str = "rv32imac_zicsr_zifencei_zaamo_zalrsc"
-            abi_str = "ilp32"
-        else:
-            # Hardware float ABI (F extension) - typically ESP32-P4 and others
-            arch_str = f"rv32imafc_zicsr_zifencei_zaamo_zalrsc{'_zcb_zcmp_zcmt' if mcu == 'esp32p4' else ''}"
-            abi_str = "ilp32f"
-    
     # Add the architecture-specific library path for libstdc++
     esp_arch_libdir = str(Path(TOOLCHAIN_DIR) / "riscv32-esp-elf" / "lib" / arch_str / abi_str)
     if os.path.isdir(esp_arch_libdir):
