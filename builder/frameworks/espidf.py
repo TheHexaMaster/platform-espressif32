@@ -1190,10 +1190,29 @@ def build_bootloader(sdk_config):
 
     bootloader_env = env.Clone()
     
-    # Handle picolibc linking for bootloader - ensure proper libgcc linking
-    # Add picolibc specs via compiler flags, not linker flags
-    bootloader_env.Append(CCFLAGS=["--specs=picolibc.specs"])
-    bootloader_env.Append(LINKFLAGS=["-lgcc"])
+    # Handle picolibc compatibility for bootloader with backward compatibility
+    # Check if we're using picolibc before applying fixes
+    toolchain_specs = bootloader_env.get("CCFLAGS", [])
+    using_picolibc = any("picolibc.specs" in str(flag) for flag in toolchain_specs)
+    
+    # Apply picolibc compatibility fixes only if picolibc is being used
+    if using_picolibc or "--specs=picolibc.specs" in env.get("CCFLAGS", []):
+        # Add picolibc specs via compiler flags, not linker flags
+        bootloader_env.Append(CCFLAGS=["--specs=picolibc.specs"])
+        # Ensure proper libgcc linking for bootloader
+        bootloader_env.Append(LINKFLAGS=["-lgcc"])
+        
+        # Add compatibility defines for bootloader when using picolibc
+        # These resolve _GLOBAL_REENT and other newlib compatibility issues
+        bootloader_env.Append(CPPDEFINES=[
+            ("_GLOBAL_REENT", "(&_reent_instance)"),
+            ("_REENT", "_reent_instance"),
+        ])
+        
+        # Provide a fallback path for the libstdc++ library for bootloader
+        bootloader_libstdc_path = get_esp32_libstdc_path(mcu, TOOLCHAIN_DIR, FRAMEWORK_DIR)
+        if bootloader_libstdc_path:
+            bootloader_env.Append(LIBPATH=[bootloader_libstdc_path])
     
     components_map = get_components_map(
         target_configs, ["STATIC_LIBRARY", "OBJECT_LIBRARY"]
@@ -1951,49 +1970,80 @@ env.MergeFlags(project_flags)
 # Handle picolibc libstdc++ linking for main firmware
 # When using picolibc.specs, default library paths are removed, so we need to
 # explicitly add the architecture-specific path for libstdc++
-if mcu in ("esp32", "esp32s2", "esp32s3"):  # Xtensa targets
-    # Add the architecture-specific library path for libstdc++
-    esp_arch_libdir = str(Path(TOOLCHAIN_DIR) / "xtensa-esp-elf" / "lib" / mcu)
-    if os.path.isdir(esp_arch_libdir):
-        env.Append(LIBPATH=[esp_arch_libdir])
-elif mcu not in ("esp32", "esp32s2", "esp32s3"):  # RISC-V targets
-    # Read architecture and ABI from official ESP-IDF toolchain configuration
-    toolchain_file = str(Path(FRAMEWORK_DIR) / "tools" / "cmake" / f"toolchain-{mcu}.cmake")
-    arch_str = None
-    abi_str = "ilp32"  # Default for RISC-V
+
+def get_esp32_libstdc_path(mcu, toolchain_dir, framework_dir):
+    """
+    Get the correct libstdc++ path for ESP32 variants with backward compatibility.
     
-    if os.path.isfile(toolchain_file):
+    This function provides backward compatibility by:
+    1. First attempting to read from official ESP-IDF toolchain files (ESP-IDF 5.5+)
+    2. Falling back to known working configurations for older ESP-IDF versions
+    3. Supporting both Xtensa and RISC-V architectures universally
+    
+    Args:
+        mcu: The target MCU (e.g., 'esp32', 'esp32c3', 'esp32p4')
+        toolchain_dir: Path to the toolchain directory
+        framework_dir: Path to the ESP-IDF framework directory
+        
+    Returns:
+        String path to the libstdc++ directory, or None if not found
+    """
+    
+    # Xtensa targets: Use MCU-specific directory
+    if mcu in ("esp32", "esp32s2", "esp32s3"):
+        esp_arch_libdir = str(Path(toolchain_dir) / "xtensa-esp-elf" / "lib" / mcu)
+        if os.path.isdir(esp_arch_libdir):
+            return esp_arch_libdir
+        return None
+    
+    # RISC-V targets: Try dynamic detection first, then fallback to known configurations
+    riscv_toolchain_base = Path(toolchain_dir) / "riscv32-esp-elf" / "lib"
+    
+    # Method 1: Try to read from official ESP-IDF toolchain configuration (ESP-IDF 5.5+)
+    toolchain_file = Path(framework_dir) / "tools" / "cmake" / f"toolchain-{mcu}.cmake"
+    if toolchain_file.is_file():
         try:
             with open(toolchain_file, 'r', encoding='utf-8') as f:
                 content = f.read()
                 # Extract -march= value from CMAKE_TOOLCHAIN_COMMON_FLAGS
                 march_match = re.search(r'-march=([^\s"]+)', content)
+                mabi_match = re.search(r'-mabi=([^\s"]+)', content)
+                
                 if march_match:
                     arch_str = march_match.group(1)
-                # Extract -mabi= value if present
-                mabi_match = re.search(r'-mabi=([^\s"]+)', content)
-                if mabi_match:
-                    abi_str = mabi_match.group(1)
+                    abi_str = mabi_match.group(1) if mabi_match else "ilp32"
+                    
+                    # Map ESP-specific extensions to actual library paths
+                    arch_str_lib = arch_str
+                    if "_xespv_xesploop" in arch_str:
+                        # ESP32-P4 specific: map to actual library directory
+                        arch_str_lib = "rv32imafc_zicsr_zifencei_zaamo_zalrsc_zcb_zcmp_zcmt"
+                    elif "_xespdsp" in arch_str:
+                        # Remove ESP DSP extension for library path
+                        arch_str_lib = arch_str.replace("_xespdsp", "")
+                    
+                    esp_arch_libdir = str(riscv_toolchain_base / arch_str_lib / abi_str)
+                    if os.path.isdir(esp_arch_libdir):
+                        return esp_arch_libdir
         except (OSError, IOError) as e:
-            print(f"Warning: Could not read toolchain file {toolchain_file}: {e}")
+            # If we can't read the toolchain file, fall back to generic scanning
+            pass
     
-    # Map toolchain architecture strings to library directory names
-    # ESP-specific extensions like _xespv_xesploop need to be mapped to actual lib paths
-    if arch_str:
-        # Remove ESP-specific extensions and use the base architecture for library paths
-        arch_str_lib = arch_str
-        if mcu == "esp32p4" and "_xespv_xesploop" in arch_str:
-            # ESP32-P4 uses simplified path: rv32imafc_zicsr_zifencei_zaamo_zalrsc_zcb_zcmp_zcmt
-            arch_str_lib = "rv32imafc_zicsr_zifencei_zaamo_zalrsc_zcb_zcmp_zcmt"
-        elif "_xespdsp" in arch_str:
-            # Remove ESP DSP extension
-            arch_str_lib = arch_str.replace("_xespdsp", "")
-        arch_str = arch_str_lib
+    # Method 2: Generic fallback - scan available directories
+    if riscv_toolchain_base.is_dir():
+        # Look for any rv32* directory that exists
+        for arch_dir in riscv_toolchain_base.iterdir():
+            if arch_dir.is_dir() and arch_dir.name.startswith("rv32"):
+                for abi_dir in arch_dir.iterdir():
+                    if abi_dir.is_dir() and abi_dir.name.startswith("ilp32"):
+                        return str(abi_dir)
     
-    # Add the architecture-specific library path for libstdc++
-    esp_arch_libdir = str(Path(TOOLCHAIN_DIR) / "riscv32-esp-elf" / "lib" / arch_str / abi_str)
-    if os.path.isdir(esp_arch_libdir):
-        env.Append(LIBPATH=[esp_arch_libdir])
+    return None
+
+# Apply the libstdc++ path fix
+libstdc_path = get_esp32_libstdc_path(mcu, TOOLCHAIN_DIR, FRAMEWORK_DIR)
+if libstdc_path:
+    env.Append(LIBPATH=[libstdc_path])
 
 env.Prepend(
     CPPPATH=app_includes["plain_includes"],
