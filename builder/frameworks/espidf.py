@@ -1957,19 +1957,50 @@ if mcu in ("esp32", "esp32s2", "esp32s3"):  # Xtensa targets
     if os.path.isdir(esp_arch_libdir):
         env.Append(LIBPATH=[esp_arch_libdir])
 elif mcu not in ("esp32", "esp32s2", "esp32s3"):  # RISC-V targets
-    # Determine float ABI based on ESP32 variant:
-    # ESP32-P4: Hardware float (ilp32f with rv32imafc)
-    # ESP32-C3: Software float (ilp32 with rv32imac) - no F extension
-    # Others: Default to hardware float
+    # Read architecture and ABI from official ESP-IDF toolchain configuration
+    toolchain_file = str(Path(FRAMEWORK_DIR) / "tools" / "cmake" / f"toolchain-{mcu}.cmake")
+    arch_str = None
+    abi_str = "ilp32"  # Default for RISC-V
     
-    if mcu == "esp32c3":
-        # ESP32-C3: Software float ABI (no F extension)
-        arch_str = "rv32imac_zicsr_zifencei_zaamo_zalrsc"
-        abi_str = "ilp32"
-    else:
-        # ESP32-P4 and others: Hardware float ABI (F extension)
-        arch_str = f"rv32imafc_zicsr_zifencei_zaamo_zalrsc{'_zcb_zcmp_zcmt' if mcu == 'esp32p4' else ''}"
-        abi_str = "ilp32f"
+    if os.path.isfile(toolchain_file):
+        try:
+            with open(toolchain_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+                # Extract -march= value from CMAKE_TOOLCHAIN_COMMON_FLAGS
+                march_match = re.search(r'-march=([^\s"]+)', content)
+                if march_match:
+                    arch_str = march_match.group(1)
+                # Extract -mabi= value if present
+                mabi_match = re.search(r'-mabi=([^\s"]+)', content)
+                if mabi_match:
+                    abi_str = mabi_match.group(1)
+        except (OSError, IOError) as e:
+            print(f"Warning: Could not read toolchain file {toolchain_file}: {e}")
+    
+    # Map toolchain architecture strings to library directory names
+    # ESP-specific extensions like _xespv_xesploop need to be mapped to actual lib paths
+    if arch_str:
+        # Remove ESP-specific extensions and use the base architecture for library paths
+        arch_str_lib = arch_str
+        if mcu == "esp32p4" and "_xespv_xesploop" in arch_str:
+            # ESP32-P4 uses simplified path: rv32imafc_zicsr_zifencei_zaamo_zalrsc_zcb_zcmp_zcmt
+            arch_str_lib = "rv32imafc_zicsr_zifencei_zaamo_zalrsc_zcb_zcmp_zcmt"
+        elif "_xespdsp" in arch_str:
+            # Remove ESP DSP extension
+            arch_str_lib = arch_str.replace("_xespdsp", "")
+        arch_str = arch_str_lib
+    
+    # Fallback to dynamic detection from SDK config if toolchain file not found or parsing failed
+    if not arch_str:
+        uses_software_float = sdk_config.get("COMPILER_FLOAT_LIB_FROM_GCCLIB", False)
+        if uses_software_float:
+            # Software float ABI (no F extension) - typically ESP32-C3
+            arch_str = "rv32imac_zicsr_zifencei_zaamo_zalrsc"
+            abi_str = "ilp32"
+        else:
+            # Hardware float ABI (F extension) - typically ESP32-P4 and others
+            arch_str = f"rv32imafc_zicsr_zifencei_zaamo_zalrsc{'_zcb_zcmp_zcmt' if mcu == 'esp32p4' else ''}"
+            abi_str = "ilp32f"
     
     # Add the architecture-specific library path for libstdc++
     esp_arch_libdir = str(Path(TOOLCHAIN_DIR) / "riscv32-esp-elf" / "lib" / arch_str / abi_str)
