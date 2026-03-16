@@ -16,9 +16,9 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/tasmota/platform-espressif32.git"
+    "url": "https://github.com/pioarduino/platform-espressif32.git"
   },
-  "version": "2026.03.50",
+  "version": "2026.03.16",
   "frameworks": {
     "arduino": {
       "script": "builder/frameworks/arduino.py"
@@ -32,8 +32,14 @@
     "framework-arduinoespressif32": {
       "type": "framework",
       "optional": true,
-      "owner": "tasmota",
-      "version": "https://github.com/Jason2866/esp32-arduino-lib-builder/releases/download/1303-1940-5.5/framework-arduinoespressif32-release_v5.5-6f36b2f3.tar.xz"
+      "owner": "espressif",
+      "version": "https://github.com/espressif/arduino-esp32/releases/download/3.3.7/esp32-core-3.3.7.tar.xz"
+    },
+    "framework-arduinoespressif32-libs": {
+      "type": "framework",
+      "optional": true,
+      "owner": "espressif",
+      "version": "https://github.com/espressif/arduino-esp32/releases/download/3.3.7/esp32-core-3.3.7-libs.tar.xz"
     },
     "framework-espidf": {
       "type": "framework",
