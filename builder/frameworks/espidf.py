@@ -1523,10 +1523,11 @@ def _ensure_generated_sources(config, project_src_dir, build_dir):
         env=idf_env,
     )
     if result["returncode"] != 0:
-        sys.stderr.write("Error: ninja could not generate required sources\n")
+        # Non-fatal: some targets (ULP, cert bundles) are built by other
+        # mechanisms later. SCons will error if a source is truly missing.
+        print("Warning: ninja could not generate some sources")
         if result.get("err"):
-            sys.stderr.write(result["err"] + "\n")
-        env.Exit(1)
+            print(result["err"])
 
 
 def compile_source_files(
