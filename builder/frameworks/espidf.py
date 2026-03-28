@@ -2163,9 +2163,6 @@ def install_python_deps():
         "esp-idf-kconfig": "~=3.7.0"
     }
 
-    if sys_platform.system() == "Darwin" and "arm" in sys_platform.machine().lower():
-        deps["chardet"] = ">=3.0.2,<4"
-
     python_exe_path = get_python_exe()
     installed_packages = _get_installed_uv_packages(python_exe_path)
     packages_to_install = []
