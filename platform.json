@@ -38,8 +38,8 @@
     "framework-espidf": {
       "type": "framework",
       "optional": true,
-      "owner": "tasmota",
-      "version": "https://github.com/tasmota/esp-idf/releases/download/v5.3.4.260127/esp-idf-v5.3.4.tar.xz"
+      "owner": "espressif",
+      "version": "https://github.com/espressif/esp-idf/releases/download/v5.5.3/esp-idf-v5.5.3.zip"
     },
     "toolchain-xtensa-esp-elf": {
       "type": "toolchain",
